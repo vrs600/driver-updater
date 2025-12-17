@@ -18,7 +18,7 @@ A powerful PowerShell CLI tool for automated Windows driver management with buil
 Open PowerShell as **Administrator** and run:
 
 ```powershell
-irm https://raw.githubusercontent.com/YOUR_USERNAME/driver-updater/main/install.ps1 | iex
+irm https://github.com/vrs600/driver-updater/blob/main/install.ps1 | iex
 ```
 
 ### Manual Installation
@@ -39,7 +39,7 @@ irm https://raw.githubusercontent.com/YOUR_USERNAME/driver-updater/main/install.
 .\Update-Drivers.ps1 -Install
 ```
 
-### Install Without Restore Point
+### Install Without a Restore Point
 ```powershell
 .\Update-Drivers.ps1 -Install -NoRestorePoint
 ```
@@ -113,7 +113,7 @@ Realtek Audio Driver            KB5123457  45.20 MB
 - Always run as Administrator
 - Creates system restore points by default (can be skipped with `-NoRestorePoint`)
 - Requires reboot after installation for changes to take effect
-- Only installs drivers from official Windows Update catalog
+- Only installs drivers from the official Windows Update catalogue
 
 ## 🤝 Contributing
 
@@ -139,8 +139,8 @@ If you find this tool helpful, please consider giving it a star on GitHub!
 
 ## 📧 Contact
 
-- GitHub: [@YOUR_USERNAME](https://github.com/YOUR_USERNAME)
-- Issues: [GitHub Issues](https://github.com/YOUR_USERNAME/driver-updater/issues)
+- GitHub: [@YOUR_USERNAME](https://github.com/vrs600)
+- Issues: [GitHub Issues](https://github.com/vrs600/driver-updater/issues)
 
 ## 🔄 Changelog
 
@@ -154,4 +154,4 @@ If you find this tool helpful, please consider giving it a star on GitHub!
 
 ---
 
-**⚠️ Disclaimer**: Use at your own risk. Always create backups before updating drivers. This tool uses the official Windows Update catalog.
+**⚠️ Disclaimer**: Use at your own risk. Always create backups before updating drivers. This tool uses the official Windows Update catalogue.
