@@ -31,7 +31,7 @@ EXAMPLES:
     .\Update-Drivers.ps1 -Install -NoRestorePoint
 
 REMOTE INSTALLATION:
-    irm https://raw.githubusercontent.com/YOUR_USERNAME/driver-updater/main/install.ps1 | iex
+    irm https://raw.githubusercontent.com/vrs600/driver-updater/main/install.ps1 | iex
 
 "@ -ForegroundColor Cyan
 }
@@ -69,11 +69,14 @@ function Install-UpdateModule {
         try {
             Install-Module PSWindowsUpdate -Force -Scope AllUsers -ErrorAction Stop
             Write-Host "✓ PSWindowsUpdate module installed" -ForegroundColor Green
-        } catch {
+        }
+        catch {
             Write-Host "✗ Failed to install module: $_" -ForegroundColor Red
             exit 1
         }
-    } else {
+        Write-Progress -Completed -Activity "Setup"
+    }
+    else {
         Write-Host "✓ PSWindowsUpdate module found" -ForegroundColor Green
     }
     Import-Module PSWindowsUpdate -ErrorAction Stop
@@ -90,10 +93,13 @@ function New-DriverRestorePoint {
     try {
         Checkpoint-Computer -Description "Before Driver Update $(Get-Date -Format 'yyyy-MM-dd HH:mm')" -RestorePointType "MODIFY_SETTINGS" -ErrorAction Stop
         Write-Host "✓ Restore point created successfully" -ForegroundColor Green
-    } catch {
+    }
+    catch {
         Write-Host "⚠ Could not create restore point: $_" -ForegroundColor Yellow
         $continue = Read-Host "Continue anyway? (Y/N)"
-        if ($continue -ne 'Y') { exit }
+        if ($continue -ne 'Y') { 
+            exit 
+        }
     }
 }
 
@@ -118,7 +124,8 @@ function Get-DriverUpdates {
         $updates | Select-Object @{N='Driver';E={$_.Title}}, @{N='KB';E={$_.KB}}, @{N='Size';E={"{0:N2} MB" -f ($_.Size/1MB)}} | Format-Table -AutoSize
         
         return $updates
-    } catch {
+    }
+    catch {
         Write-Host "✗ Error scanning for updates: $_" -ForegroundColor Red
         exit 1
     }
@@ -144,7 +151,8 @@ function Install-DriverUpdates {
         try {
             Install-WindowsUpdate -KBArticleID $update.KB -AcceptAll -IgnoreReboot -Confirm:$false -ErrorAction Stop | Out-Null
             Write-Host "✓ Installed: $($update.Title)" -ForegroundColor Green
-        } catch {
+        }
+        catch {
             Write-Host "✗ Failed: $($update.Title)" -ForegroundColor Red
         }
     }
@@ -182,7 +190,8 @@ function Show-RollbackMenu {
                 $kb = Read-Host "Enter KB number to uninstall"
                 Write-Host "Uninstalling KB$kb..." -ForegroundColor Cyan
                 Get-WindowsUpdate -KBArticleID $kb -Uninstall -Confirm:$false
-            } else {
+            }
+            else {
                 Write-Host "No recent driver updates found." -ForegroundColor Yellow
             }
         }
@@ -225,7 +234,8 @@ try {
         if ($reboot -eq 'Y') {
             Restart-Computer -Force
         }
-    } elseif (-not $Install -and $updates) {
+    }
+    elseif (-not $Install -and $updates) {
         Write-Host ""
         $proceed = Read-Host "Install these updates? (Y/N)"
         if ($proceed -eq 'Y') {
@@ -238,8 +248,8 @@ try {
             }
         }
     }
-    
-} catch {
+}
+catch {
     Write-Host ""
     Write-Host "✗ An error occurred: $_" -ForegroundColor Red
     exit 1
