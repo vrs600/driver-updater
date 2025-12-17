@@ -1,256 +1,139 @@
-# ===============================
-# Driver Updater CLI v1.0
-# ===============================
-
 param(
-    [switch]$Help,
     [switch]$Scan,
     [switch]$Install,
     [switch]$Rollback,
-    [switch]$NoRestorePoint
+    [switch]$NoRestorePoint,
+    [switch]$Help
 )
 
-# ---- Display Help ----
-function Show-Help {
-    Write-Host @"
-Driver Updater CLI - Automated Windows Driver Management
+# ===============================
+# Elevation
+# ===============================
+$identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+$principal = New-Object Security.Principal.WindowsPrincipal($identity)
 
-USAGE:
-    .\Update-Drivers.ps1 [OPTIONS]
-
-OPTIONS:
-    -Scan              Scan for available driver updates
-    -Install           Install all available driver updates
-    -Rollback          Launch rollback options
-    -NoRestorePoint    Skip creating system restore point
-    -Help              Display this help message
-
-EXAMPLES:
-    .\Update-Drivers.ps1 -Scan
-    .\Update-Drivers.ps1 -Install
-    .\Update-Drivers.ps1 -Install -NoRestorePoint
-
-REMOTE INSTALLATION:
-    irm https://raw.githubusercontent.com/vrs600/driver-updater/main/install.ps1 | iex
-
-"@ -ForegroundColor Cyan
-}
-
-# ---- Auto Elevation ----
-function Test-Admin {
-    ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-}
-
-if (-not (Test-Admin)) {
-    Write-Host "Requesting administrator privileges..." -ForegroundColor Yellow
-    $args = "-ExecutionPolicy Bypass -File `"$PSCommandPath`" " + ($PSBoundParameters.Keys | ForEach-Object { "-$_ " }) -join " "
-    Start-Process powershell -ArgumentList $args -Verb RunAs
+if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Write-Host "Administrator privileges required." -ForegroundColor Yellow
+    Write-Host "UAC prompt will appear. Click YES." -ForegroundColor Yellow
+    Start-Process powershell.exe -Verb RunAs `
+        -ArgumentList "-ExecutionPolicy Bypass -File `"$PSCommandPath`""
     exit
 }
 
-# ---- Main Header ----
+# ===============================
+# Header
+# ===============================
 Clear-Host
-Write-Host "═══════════════════════════════════════" -ForegroundColor Cyan
-Write-Host "    Driver Updater CLI v1.0" -ForegroundColor Green
-Write-Host "═══════════════════════════════════════" -ForegroundColor Cyan
+Write-Host "======================================" -ForegroundColor Cyan
+Write-Host " Driver Updater CLI v1.0" -ForegroundColor Green
+Write-Host "======================================" -ForegroundColor Cyan
 Write-Host ""
 
-# Show help if requested
 if ($Help) {
-    Show-Help
+    Write-Host "USAGE:"
+    Write-Host "  .\Update-Drivers.ps1 -Scan"
+    Write-Host "  .\Update-Drivers.ps1 -Install"
+    Write-Host "  .\Update-Drivers.ps1 -Rollback"
     exit
 }
 
-# ---- Install Module ----
-function Install-UpdateModule {
-    Write-Host "[1/4] Checking dependencies..." -ForegroundColor Cyan
-    if (-not (Get-Module -ListAvailable -Name PSWindowsUpdate)) {
-        Write-Progress -Activity "Setup" -Status "Installing PSWindowsUpdate module" -PercentComplete 25
-        try {
-            Install-Module PSWindowsUpdate -Force -Scope AllUsers -ErrorAction Stop
-            Write-Host "✓ PSWindowsUpdate module installed" -ForegroundColor Green
-        }
-        catch {
-            Write-Host "✗ Failed to install module: $_" -ForegroundColor Red
-            exit 1
-        }
-        Write-Progress -Completed -Activity "Setup"
-    }
-    else {
-        Write-Host "✓ PSWindowsUpdate module found" -ForegroundColor Green
-    }
-    Import-Module PSWindowsUpdate -ErrorAction Stop
+# ===============================
+# Dependency
+# ===============================
+if (-not (Get-Module -ListAvailable -Name PSWindowsUpdate)) {
+    Write-Host "Installing PSWindowsUpdate module..." -ForegroundColor Cyan
+    Install-Module PSWindowsUpdate -Force -Scope AllUsers
+}
+Import-Module PSWindowsUpdate
+
+# ===============================
+# Restore Point
+# ===============================
+if (-not $NoRestorePoint) {
+    Write-Host "Creating restore point (if enabled)..." -ForegroundColor Cyan
+    Enable-ComputerRestore -Drive "C:\" -ErrorAction SilentlyContinue
+    Checkpoint-Computer -Description "Before Driver Update" `
+        -RestorePointType MODIFY_SETTINGS `
+        -ErrorAction SilentlyContinue
 }
 
-# ---- Create Restore Point ----
-function New-DriverRestorePoint {
-    if ($NoRestorePoint) {
-        Write-Host "[2/4] Skipping restore point creation" -ForegroundColor Yellow
-        return
+# ===============================
+# Rollback
+# ===============================
+if ($Rollback) {
+    Write-Host ""
+    Write-Host "Rollback Options" -ForegroundColor Yellow
+    Write-Host "1. Open System Restore"
+    Write-Host "2. View installed driver updates"
+    Write-Host "3. Exit"
+
+    $choice = Read-Host "Select option"
+
+    if ($choice -eq "1") {
+        rstrui.exe
     }
-    
-    Write-Host "[2/4] Creating system restore point..." -ForegroundColor Cyan
-    try {
-        Checkpoint-Computer -Description "Before Driver Update $(Get-Date -Format 'yyyy-MM-dd HH:mm')" -RestorePointType "MODIFY_SETTINGS" -ErrorAction Stop
-        Write-Host "✓ Restore point created successfully" -ForegroundColor Green
+    elseif ($choice -eq "2") {
+        Get-WindowsUpdate -MicrosoftUpdate -UpdateType Driver -IsInstalled |
+        Format-Table Title, KB, InstalledOn -AutoSize
     }
-    catch {
-        Write-Host "⚠ Could not create restore point: $_" -ForegroundColor Yellow
-        $continue = Read-Host "Continue anyway? (Y/N)"
-        if ($continue -ne 'Y') { 
-            exit 
-        }
-    }
+    exit
 }
 
-# ---- Scan Drivers ----
-function Get-DriverUpdates {
-    Write-Host "[3/4] Scanning for driver updates..." -ForegroundColor Cyan
-    Write-Progress -Activity "Scanning" -Status "Checking Windows Update catalog" -PercentComplete 50
-    
-    try {
-        $updates = Get-WindowsUpdate -MicrosoftUpdate -UpdateType Driver -ErrorAction Stop
-        Write-Progress -Completed -Activity "Scanning"
-        
-        if ($updates.Count -eq 0) {
-            Write-Host "✓ All drivers are up to date!" -ForegroundColor Green
-            return $null
-        }
-        
-        Write-Host "✓ Found $($updates.Count) driver update(s)" -ForegroundColor Green
-        Write-Host ""
-        Write-Host "Available Updates:" -ForegroundColor Cyan
-        Write-Host "─────────────────────────────────────" -ForegroundColor Gray
-        $updates | Select-Object @{N='Driver';E={$_.Title}}, @{N='KB';E={$_.KB}}, @{N='Size';E={"{0:N2} MB" -f ($_.Size/1MB)}} | Format-Table -AutoSize
-        
-        return $updates
-    }
-    catch {
-        Write-Host "✗ Error scanning for updates: $_" -ForegroundColor Red
-        exit 1
-    }
+# ===============================
+# Scan
+# ===============================
+Write-Host "Scanning for driver updates..." -ForegroundColor Cyan
+Write-Progress -Activity "Scanning Drivers" -Status "Checking Microsoft Update" -PercentComplete 50
+
+$updates = Get-WindowsUpdate -MicrosoftUpdate -UpdateType Driver -ErrorAction SilentlyContinue
+
+Write-Progress -Completed -Activity "Scanning Drivers"
+
+if (-not $updates) {
+    Write-Host "All drivers are already up to date." -ForegroundColor Green
+    Write-Host ""
+    Write-Host "Press ENTER to exit..." -ForegroundColor Yellow
+    Read-Host
+    return
 }
 
-# ---- Install Drivers ----
-function Install-DriverUpdates {
-    param($Updates)
-    
-    if (-not $Updates) {
-        Write-Host "No updates to install." -ForegroundColor Yellow
-        return
+
+Write-Host "Found $($updates.Count) driver update(s):" -ForegroundColor Green
+$updates | Select Title, KB, Size | Format-Table -AutoSize
+
+if ($Scan) {
+    exit
+}
+
+# ===============================
+# Install
+# ===============================
+if ($Install) {
+    $total = $updates.Count
+    $index = 0
+
+    foreach ($u in $updates) {
+        $index++
+        Write-Progress `
+            -Activity "Installing Drivers" `
+            -Status $u.Title `
+            -PercentComplete (($index / $total) * 100)
+
+        Install-WindowsUpdate `
+            -KBArticleID $u.KB `
+            -AcceptAll `
+            -IgnoreReboot `
+            -Confirm:$false | Out-Null
+
+        Write-Host "Installed: $($u.Title)" -ForegroundColor Green
     }
-    
-    Write-Host "[4/4] Installing driver updates..." -ForegroundColor Cyan
-    $progress = 0
-    $increment = 100 / $Updates.Count
-    
-    foreach ($update in $Updates) {
-        $progress += $increment
-        Write-Progress -Activity "Installing Drivers" -Status "Installing: $($update.Title)" -PercentComplete $progress
-        
-        try {
-            Install-WindowsUpdate -KBArticleID $update.KB -AcceptAll -IgnoreReboot -Confirm:$false -ErrorAction Stop | Out-Null
-            Write-Host "✓ Installed: $($update.Title)" -ForegroundColor Green
-        }
-        catch {
-            Write-Host "✗ Failed: $($update.Title)" -ForegroundColor Red
-        }
-    }
-    
+
     Write-Progress -Completed -Activity "Installing Drivers"
-    Write-Host ""
-    Write-Host "═══════════════════════════════════════" -ForegroundColor Cyan
-    Write-Host "  Installation completed!" -ForegroundColor Green
-    Write-Host "═══════════════════════════════════════" -ForegroundColor Cyan
-}
 
-# ---- Rollback Menu ----
-function Show-RollbackMenu {
     Write-Host ""
-    Write-Host "Rollback Options:" -ForegroundColor Yellow
-    Write-Host "─────────────────────────────────────" -ForegroundColor Gray
-    Write-Host "1. Launch System Restore"
-    Write-Host "2. Uninstall last driver update"
-    Write-Host "3. View installed updates"
-    Write-Host "4. Exit"
-    Write-Host ""
-    
-    $choice = Read-Host "Select option (1-4)"
-    
-    switch ($choice) {
-        "1" {
-            Write-Host "Launching System Restore..." -ForegroundColor Cyan
-            rstrui.exe
-        }
-        "2" {
-            Write-Host "Fetching recent updates..." -ForegroundColor Cyan
-            $recent = Get-WindowsUpdate -MicrosoftUpdate -UpdateType Driver -IsInstalled
-            if ($recent) {
-                $recent | Select-Object Title, KB, InstalledOn | Format-Table -AutoSize
-                $kb = Read-Host "Enter KB number to uninstall"
-                Write-Host "Uninstalling KB$kb..." -ForegroundColor Cyan
-                Get-WindowsUpdate -KBArticleID $kb -Uninstall -Confirm:$false
-            }
-            else {
-                Write-Host "No recent driver updates found." -ForegroundColor Yellow
-            }
-        }
-        "3" {
-            Write-Host "Installed driver updates:" -ForegroundColor Cyan
-            Get-WindowsUpdate -MicrosoftUpdate -UpdateType Driver -IsInstalled | Select-Object Title, KB, InstalledOn | Format-Table -AutoSize
-        }
-        default {
-            Write-Host "Exiting..." -ForegroundColor Green
-        }
+    $reboot = Read-Host "Reboot now? (Y/N)"
+    if ($reboot -eq "Y") {
+        Restart-Computer -Force
     }
 }
 
-# ---- Main Execution ----
-try {
-    if ($Rollback) {
-        Install-UpdateModule
-        Show-RollbackMenu
-        exit
-    }
-    
-    Install-UpdateModule
-    
-    if (-not $NoRestorePoint) {
-        New-DriverRestorePoint
-    }
-    
-    $updates = Get-DriverUpdates
-    
-    if ($Scan) {
-        # Scan only mode
-        exit
-    }
-    
-    if ($Install -and $updates) {
-        Install-DriverUpdates -Updates $updates
-        
-        Write-Host ""
-        $reboot = Read-Host "Reboot now to apply changes? (Y/N)"
-        if ($reboot -eq 'Y') {
-            Restart-Computer -Force
-        }
-    }
-    elseif (-not $Install -and $updates) {
-        Write-Host ""
-        $proceed = Read-Host "Install these updates? (Y/N)"
-        if ($proceed -eq 'Y') {
-            Install-DriverUpdates -Updates $updates
-            
-            Write-Host ""
-            $reboot = Read-Host "Reboot now to apply changes? (Y/N)"
-            if ($reboot -eq 'Y') {
-                Restart-Computer -Force
-            }
-        }
-    }
-}
-catch {
-    Write-Host ""
-    Write-Host "✗ An error occurred: $_" -ForegroundColor Red
-    exit 1
-}
